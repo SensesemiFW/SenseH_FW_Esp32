@@ -18,6 +18,7 @@
 #include "ECG_12_Lead.h"
 #include "driver/periph_ctrl.h"
 #include "Hardware.h"
+#include "bluetooth.h"
 
 // MACROS REQUIRED FOR WDOG SpO2
 
@@ -80,8 +81,9 @@ float FilterOutputBuffer1[TOTAL_SAMPLES];
 float FilterOutputBuffer2[TOTAL_SAMPLES];
 float FilterOutputBuffer3[TOTAL_SAMPLES];
 float FilterOutputBuffer4[TOTAL_SAMPLES];
-
+extern bool qv_flag,mv_flag;
 char date_info[50];
+uint8_t reg;
 typedef struct __attribute__((__packed__))
 {
 	uint32_t  		record_len;
@@ -219,8 +221,10 @@ bool QUICK_Test1(void)
 			   Vital_result.SBP1 = 0; // Should remove this when BP estimation Algorithm implemented
 			   Vital_result.DBP1 = 0; // Should remove this when BP estimation Algorithm implemented
 
-
+               if(qv_flag)
+               {
 			   API_Disp_Quick_Test_Result(result);
+               }
 			   if(Selected_PID_type != GUEST_PID) Store_QuickTest1_Data_To_Flash();
 		   }
 
@@ -253,7 +257,9 @@ bool QUICK_Test1(void)
 
 	 API_IO_Exp_Power_Control(EN_VLED,HIGH);
 	 API_IO_Exp_Power_Control(EN_ANALOG,HIGH);
-	 API_IO_Exp_Power_Control(EN_IR,HIGH);
+	// API_IO_Exp_Power_Control(EN_IR,HIGH);
+
+
 
 	if((Selected_PID_type == VALID_PID) || (Selected_PID_type == GUEST_PID))
 	{
@@ -299,8 +305,23 @@ bool QUICK_Test1(void)
 */
 				 if(API_MAX86150_Setup())
 				 {
-					if(API_ECG_Init())
+					if((API_ECG_Init()))
 						{
+
+						  uint8_t ret;
+
+					    /*  while(1)
+						  {
+							 ret = readRegister8(0x00,reg);
+							 if(ret)
+							 printf("\n %x",ret);
+							 if(API_Push_Btn_Get_Buttton_Press())
+					         {
+								Disable_Power_Supply();
+							    return 0;
+							 }
+
+						  }*/
 #if 1
 						    if(API_Push_Btn_Get_Buttton_Press())
 						    {
@@ -317,20 +338,21 @@ bool QUICK_Test1(void)
 							API_IO_Exp_Power_Control(EN_IR,LOW);
 #endif
 #if 1
-							API_Disp_Quick_test_screen(DISP_QT_ECG_L1_TEST_IN_PROGRESS);
+							API_Disp_Quick_test_screen(DISP_QT_ECG_TEST_IN_PROGRESS);
 							Print_time("/ECG start");
 							if(Capture_PPG_ECG_Data(CAPTURE_ECG_L1_AND_L2,TRUE)==FALSE)
 							{
 							   Disable_Power_Supply();
 							   return FALSE;
 							}
+
 							Print_time("\nECG end");
 #endif
 #if 1
 							API_Disp_Quick_test_screen(DISP_QT_BP_TEST_IN_PROGRESS);
 							printf("\nCapturing BP................");
 							API_IO_Exp_Power_Control(EN_VLED,HIGH);
-							API_IO_Exp_Power_Control(EN_IR,HIGH);
+							//API_IO_Exp_Power_Control(EN_IR,HIGH);
 							Print_time("\nBP START");
 							if(!(Capture_BP_Data(TRUE)))
 							{
@@ -347,10 +369,20 @@ bool QUICK_Test1(void)
 							result[1] = 85;
 							result[2] = 115;
 							result[3] = 85;
-
-							API_Disp_Quick_Test_Result(result);
+                            if(qv_flag)
+                            {
+							    API_Disp_Quick_Test_Result(result);
+                            }
 							if(Selected_PID_type != GUEST_PID) Store_QuickTest1_Data_To_Flash();
 					   }
+					else
+					{
+						 printf("\nECg init failed ....\n");
+					}
+				 }
+				 else
+				 {
+					 printf("\nMAx init failed ....\n");
 				 }
 			}
 
@@ -381,7 +413,12 @@ bool QUICK_Test1(void)
 
 	Disable_Power_Supply();
 
-  	printf("\nTest completed.");
+  	printf("\nTest completed.\t%d",Is_Device_Paired);
+
+  	if(Is_Device_Paired == BT_DISCONNECTED) // Paired condition
+  	{
+  		Selected_PID_type = PID_NOT_SELECTED;
+  	}
 
 	return true;
 }
@@ -519,6 +556,7 @@ void Dummy_Capture(uint16_t total_samples)
 #endif
 		//uint8_t reg = 0xA5;
 #if 1
+		//while()
 		//uint8_t ret ;
 		//ret = readRegister8(0x00,reg);
 		//printf("\n %x",ret);
@@ -607,7 +645,6 @@ void Dummy_Capture(uint16_t total_samples)
 
 			MemSet(ECG_Lead1_buff,0,sizeof(ECG_Lead1_buff));
 			MemSet(ECG_Lead2_buff,0,sizeof(ECG_Lead2_buff));
-
 			for(raw_data_index=0; raw_data_index<(ECG_IN_SECONDS*SET_ODR); raw_data_index++)
 			{
 				if(API_Push_Btn_Get_Buttton_Press())
@@ -621,6 +658,7 @@ void Dummy_Capture(uint16_t total_samples)
 			//printf("\n total data ready interrupts = %d\n", ECG_Drdy_count);
 			ECG_Drdy_count = 0;
 			API_ECG_Stop_Conversion();
+#if 1
 			printf("\nECG L1 data:\n");
 			for(int i=0;i<(ECG_IN_SECONDS*SET_ODR);i++)
 			{
@@ -632,6 +670,7 @@ void Dummy_Capture(uint16_t total_samples)
 			{
 			  printf("\n%f",ECG_Lead2_buff[i]);
 			}
+#endif
 			
 		}
 		}
@@ -2000,8 +2039,17 @@ bool Run_Multi_Vital(void)
 	//if(Lead12_LeadOff_Detect() == FALSE)
 	if(1)
 	{
-		printf("lead off not detected\n");
-		Lead12_Test(); // This is the core function to capture 12Lead ECG
+		if(!(Run_Quick_Vital()))
+		{
+			Disable_Power_Supply();
+			return 0;
+		}
+		//printf("lead off not detected\n");
+		if(!(Lead12_Test()))
+		{
+			Disable_Power_Supply();
+			return 0; // This is the core function to capture 12Lead ECG
+		}
 	}
 	else
 	{
